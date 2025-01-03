@@ -1,5 +1,9 @@
+import random
 import time
 import re
+
+import html2text
+from openai import OpenAI
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
@@ -7,7 +11,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import tkinter as tk
 from tkinter import messagebox
-from selenium.webdriver.common.action_chains import ActionChains
+
 
 def WebDriverStart():
     # 启动 WebDriver
@@ -26,6 +30,7 @@ def WebDriverStart():
     })
     return driver
 
+
 def clean_solution(solution):
     # 去除超过两个空格的连续空格
     solution = re.sub(r'\s{2,}', ' ', solution)
@@ -35,12 +40,34 @@ def clean_solution(solution):
     return solution.strip()  # 去除两端空白
 
 
+#
+def DeepSeekAsk(prompt, temperature):
+    api_key = "sk-ecee03845a1b42938fb66bae42694268"
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+        messages=[
+            {"role": "user", "content": prompt},
+        ],
+        temperature=temperature,
+        stream=False
+    )
+
+    print(response.choices[0].message.content)
+    return response.choices[0].message.content
+
+
+
 def start_login():
     username = username_entry.get()
     password = password_entry.get()
+    chapter = int(chapter_entry.get())
 
     if not username or not password:
         messagebox.showerror("错误", "用户名或密码不能为空！")
+        return
+    if not chapter:
+        messagebox.showerror("错误", "开始章节不允许为空！")
         return
 
     try:
@@ -89,7 +116,7 @@ def start_login():
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".panel.panel-default"))
             )
             # 获取总的章节数
-            chapter = len(panel) - 1
+            chapters = len(panel) - 1
             # 各个章节的结构数量
             panel_sum = WebDriverWait(driver, 10).until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".progress_fix"))
@@ -104,8 +131,8 @@ def start_login():
                 chapter_title_sum[index] = num
                 index += 1
             # 开始遍历所有的章节小节内容
-            for i in range(1, chapter + 1):
-                for j in range(1, chapter_title_sum[i] + 1):
+            for i in range(chapter, chapters + 1):
+                for j in range(26, chapter_title_sum[i] + 1):
                     url = f"https://welearn.sflep.com/student/StudyCourse.aspx?cid=3313&classid=602663&sco=m-2-{i}-{j}"
                     # 跳转到学习页面并切换到 iframe
                     driver.get(url)
@@ -120,11 +147,12 @@ def start_login():
                         button.click()
                         continue
 
-                    # 目前可以处理的题目类型有4种
+                    # 目前可以处理的题目类型有5种
                     choice_elements = driver.find_elements(By.CSS_SELECTOR, "div[data-controltype='choice']")
                     fillinglong_elements = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='fillinglong']")
                     filling_elements = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='filling']")
                     click_elements = driver.find_elements(By.CSS_SELECTOR, ".ChooseBox.block_content.p")
+                    writing_elements = driver.find_elements(By.CSS_SELECTOR, ".common_writing")
 
                     # 1.处理选择题逻辑
                     if choice_elements != []:
@@ -133,9 +161,9 @@ def start_login():
                             options_li = ul.find_elements(By.TAG_NAME, "li")  # 获取每个ul下的所有li元素
                             for option in options_li:
                                 solution = option.get_attribute("data-solution")
-                                if solution != None:  # 如果有解决方案
+                                if solution is not None:  # 如果有解决方案
                                     driver.execute_script("arguments[0].click();", option)
-                                    time.sleep(0.1)
+                                    time.sleep(0.3)
                                     print(f"已选择答案: {solution}")
                                     break  # 找到后退出循环
 
@@ -159,11 +187,12 @@ def start_login():
                                 # 清理答案，去除连续空格和换行符
                                 cleaned_solution = clean_solution(solution)
                                 print(f"标准答案: {cleaned_solution}")
-                                driver.execute_script("arguments[0].scrollIntoView(true);", input_field)
+                                driver.execute_script("arguments[0].scrollIntoView(1true);", input_field)
                                 driver.execute_script("arguments[0].value = '';", input_field)
                                 if cleaned_solution != "(Answers may vary.)":
                                     # 使用 JavaScript 向输入框发送文本
-                                    driver.execute_script("arguments[0].value = arguments[1];", input_field, cleaned_solution)
+                                    driver.execute_script("arguments[0].value = arguments[1];", input_field,
+                                                          cleaned_solution)
                                 else:
                                     driver.execute_script("arguments[0].value = arguments[1];", input_field, "None")
 
@@ -179,7 +208,6 @@ def start_login():
                             result_div = WebDriverWait(question, 10).until(
                                 EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-itemtype='result']"))
                             )
-                            time.sleep(0.3)
 
                             solution = result_div.get_attribute('innerHTML').strip()  # 获取 HTML 内容，并去除多余空格
                             if solution.find(solution) != -1:
@@ -234,9 +262,10 @@ def start_login():
                                     driver.execute_script("arguments[0].click();", div)
                                     flag = False
 
-                                time.sleep(0.1)
                                 # 获取当前值并进行检查
-                                all_li_elements = driver.find_elements(By.CSS_SELECTOR, ".ChooseSheet_cell_flex li")
+                                all_li_elements = WebDriverWait(driver, 10).until(
+                                    EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".ChooseSheet_cell_flex li"))
+                                )
                                 for li in all_li_elements:
                                     span_content = li.find_element(By.TAG_NAME, "span").text.replace(' ', '')
                                     solution = solution.replace(' ', '')
@@ -244,14 +273,72 @@ def start_login():
                                         driver.execute_script("arguments[0].click();", li)
                                         break
 
+                    # 5.作文类型题目逻辑
+                    if writing_elements != []:
+                        prompt = ""
+                        # 初始化 html2text 转换器
+                        html_to_md = html2text.HTML2Text()
+                        html_to_md.ignore_links = False  # 保留链接
+                        html_to_md.ignore_images = False  # 保留图片
+
+                        # 1. 题目描述
+                        prompt += "## 一、题目描述\n"
+                        writing_descriptions = driver.find_elements(By.CLASS_NAME, "direction")
+                        for description in writing_descriptions:
+                            description_html = description.get_attribute("innerHTML")  # 获取 HTML 内容
+                            description_md = html_to_md.handle(description_html)  # 转换为 Markdown
+                            description_text = clean_solution(description_md.strip())  # 清理内容
+                            prompt += f"- {description_text}\n"
+
+                        # 2.题目要求和Tips技巧
+                        prompt += "## 二、下面是题目给的一些题目要求和写作小技巧\n"
+                        tip_descriptions = driver.find_elements(By.CLASS_NAME, "writing_evaluation_content")
+                        for tip in tip_descriptions:
+                            tip_html = tip.get_attribute("innerHTML")  # 获取 HTML 内容
+                            tip_md = html_to_md.handle(tip_html)  # 转换为 Markdown
+                            tip_text = clean_solution(tip_md.strip())  # 清理内容
+                            prompt += f"- {tip_text}\n"
+
+                        # 3.引入个性化提示
+                        prompt += (
+                            "## 三、请求生成答案\n"
+                            "请根据上述题目描述和要求，生成该题目的答案。\n"
+                            "请注意：\n"
+                            "- 答案必须是完整的，不能包含任何需要手动填写的占位符（如 `your name: []` 或 `[在此处填写]`）。\n"
+                            "- 答案需结合你的个人经历或观点，使其更具独特性。\n"
+                            "- 答案需使用英文作文常用的三段式结构，包括以下部分：\n"
+                            "  1. **标题**：简洁明了，概括文章主题。\n"
+                            "  2. **开头**：引入主题，明确观点或立场。\n"
+                            "  3. **正文**：展开论述，提供支持观点的理由或例子。\n"
+                            "  4. **结尾**：总结全文，重申观点或提出建议。\n"
+                            "- 无论是标题、开头、正文还是结尾都只需使用最简单的文本格式，请特别注意标题要和正文格式一致，不要再使用**符号了，同时也不要像类似于Title:Friendship  的格式展示标题了，给出类似于Friendship内容即可\n"
+                            "感谢你的配合！"
+                        )
+                        # 最终就是使用这个 prompt 调用deepseek的接口进行问答即可，
+                        temperature = random.choice([0.8, 0.9, 1.0])
+                        answer = DeepSeekAsk(prompt, temperature)
+
+                        # 点击编辑按钮，然后将获取的答案填充进去即可
+
+                        writing_create_icon_button = driver.find_element(By.CLASS_NAME, "writing_create_icon")
+                        writing_create_icon_button.click()
+
+                        modify_content = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, ".my_textarea_content"))
+                        )
+                        driver.execute_script("arguments[0].value = '';", modify_content)
+                        driver.execute_script("arguments[0].value = arguments[1];", modify_content,
+                                              answer)
+
                     # 这一种类型标识什么都没有
-                    if choice_elements == [] and fillinglong_elements == [] and filling_elements == [] and click_elements == []:
+                    if choice_elements == [] and fillinglong_elements == [] and filling_elements == [] and click_elements == [] and writing_elements == []:
                         time.sleep(0.5)
                         driver.switch_to.default_content()
                         button = driver.find_element(By.CSS_SELECTOR, "a[href='javascript:ReturnMain();']")
                         driver.execute_script("arguments[0].click();", button)
                         continue
 
+                    time.sleep(0.3)
                     submit_button = driver.find_element(By.CSS_SELECTOR, "[data-controltype='submit']")
                     if submit_button == []:
                         driver.switch_to.default_content()
@@ -277,6 +364,7 @@ def start_login():
     finally:
         driver.quit()
 
+
 if __name__ == '__main__':
     # 创建主窗口
     root = tk.Tk()
@@ -284,7 +372,7 @@ if __name__ == '__main__':
 
     # 窗口尺寸
     window_width = 500
-    window_height = 300
+    window_height = 350
 
     # 获取屏幕尺寸
     screen_width = root.winfo_screenwidth()
@@ -324,6 +412,15 @@ if __name__ == '__main__':
     ).grid(row=0, column=0, padx=15)
     password_entry = tk.Entry(password_frame, font=("Arial", 14), show="*", width=30)
     password_entry.grid(row=0, column=1, padx=10)
+
+    # 第几单元开始
+    chapter_frame = tk.Frame(root, bg="#f0f8ff")
+    chapter_frame.pack(pady=15)
+    tk.Label(
+        chapter_frame, text="章节:", font=("Arial", 14), bg="#f0f8ff", fg="#333333"
+    ).grid(row=0, column=0, padx=15)
+    chapter_entry = tk.Entry(chapter_frame, font=("Arial", 14), width=30)
+    chapter_entry.grid(row=0, column=1, padx=10)
 
     # 登录按钮
     login_button = tk.Button(
