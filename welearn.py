@@ -80,14 +80,22 @@ def start_login():
             driver.find_element(By.ID, "login").click()
             # 等待页面
             ccid = 3313
-            WebDriverWait(driver, 15).until(EC.url_changes("https://sso.sflep.com/idsvr/login.html"))
 
+            WebDriverWait(driver, 15).until(EC.url_changes("https://sso.sflep.com/idsvr/login.html"))
+            # 首先进入根页面
             root_url = f"https://welearn.sflep.com/student/course_info.aspx?cid={ccid}"
             driver.get(root_url)
-            time.sleep(3)
-            panel = driver.find_elements(By.CSS_SELECTOR, ".panel.panel-default")
+            panel = WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".panel.panel-default"))
+            )
+            # 获取总的章节数
             chapter = len(panel) - 1
-            panel_sum = driver.find_elements(By.CSS_SELECTOR, ".progress_fix")
+            # 各个章节的结构数量
+            panel_sum = WebDriverWait(driver, 10).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".progress_fix"))
+            )
+
+            # 存储各个章节的数量结构
             chapter_title_sum = {}
             index = 0
             for panel_little in panel_sum:
@@ -95,6 +103,7 @@ def start_login():
                 num = int(text.split('/')[1])
                 chapter_title_sum[index] = num
                 index += 1
+            # 开始遍历所有的章节小节内容
             for i in range(1, chapter + 1):
                 for j in range(1, chapter_title_sum[i] + 1):
                     url = f"https://welearn.sflep.com/student/StudyCourse.aspx?cid=3313&classid=602663&sco=m-2-{i}-{j}"
@@ -103,23 +112,22 @@ def start_login():
                     iframe = WebDriverWait(driver, 10).until(
                         EC.presence_of_element_located((By.TAG_NAME, "iframe"))
                     )
-
-                    time.sleep(0.3)
                     driver.switch_to.frame(iframe)
-                    # print(driver.page_source)
-                    print(driver.find_elements(By.CSS_SELECTOR, "[data-submitted]"))
+                    # 看看是否存在提交按钮，如果不存在，那么就直接跳过进入下一章节
                     if driver.find_elements(By.CSS_SELECTOR, "[data-submitted]") != []:
                         driver.switch_to.default_content()
                         button = driver.find_element(By.CSS_SELECTOR, "a[href='javascript:ReturnMain();']")
                         button.click()
                         continue
-                    # 1.处理选择题逻辑
+
+                    # 目前可以处理的题目类型有4种
                     choice_elements = driver.find_elements(By.CSS_SELECTOR, "div[data-controltype='choice']")
                     fillinglong_elements = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='fillinglong']")
                     filling_elements = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='filling']")
                     click_elements = driver.find_elements(By.CSS_SELECTOR, ".ChooseBox.block_content.p")
 
-                    if choice_elements != []:  # 如果选择题存在
+                    # 1.处理选择题逻辑
+                    if choice_elements != []:
                         ul_elements = driver.find_elements(By.CSS_SELECTOR, "ul[data-itemtype='options']")  # 获取所有的ul
                         for ul in ul_elements:  # 遍历所有的ul
                             options_li = ul.find_elements(By.TAG_NAME, "li")  # 获取每个ul下的所有li元素
@@ -127,7 +135,7 @@ def start_login():
                                 solution = option.get_attribute("data-solution")
                                 if solution != None:  # 如果有解决方案
                                     driver.execute_script("arguments[0].click();", option)
-                                    time.sleep(0.3)
+                                    time.sleep(0.1)
                                     print(f"已选择答案: {solution}")
                                     break  # 找到后退出循环
 
@@ -135,7 +143,6 @@ def start_login():
                     if fillinglong_elements != []:  # 判断填空题是否存在
                         filling_questions = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='fillinglong']")
                         for question in filling_questions:
-                            time.sleep(0.3)
                             # 等待并获取填写框
                             input_field = WebDriverWait(question, 10).until(
                                 EC.presence_of_element_located((By.CSS_SELECTOR, "textarea[data-itemtype='textarea']"))
@@ -154,7 +161,7 @@ def start_login():
                                 print(f"标准答案: {cleaned_solution}")
                                 driver.execute_script("arguments[0].scrollIntoView(true);", input_field)
                                 driver.execute_script("arguments[0].value = '';", input_field)
-                                if input_field != "(Answers may vary.)":
+                                if cleaned_solution != "(Answers may vary.)":
                                     # 使用 JavaScript 向输入框发送文本
                                     driver.execute_script("arguments[0].value = arguments[1];", input_field, cleaned_solution)
                                 else:
@@ -184,20 +191,22 @@ def start_login():
                                 cleaned_solution = clean_solution(solution)
                                 print(f"标准答案: {cleaned_solution}")
                                 driver.execute_script("arguments[0].value = '';", input_field)
-                                if input_field != "(Answers may vary.)":
+                                if cleaned_solution != "(Answers may vary.)":
                                     driver.execute_script("arguments[0].value = arguments[1];", input_field,
                                                           cleaned_solution)  # 填写答案
                                 else:
                                     driver.execute_script("arguments[0].value = arguments[1];", input_field, "None")
 
+                    # 4.选择点击类型题目逻辑
                     if click_elements != []:
                         # 先模拟点击一下：
                         filling_questions = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='filling']")
                         click_here_style = driver.find_element(By.CLASS_NAME, "click_here_style")
                         driver.execute_script("arguments[0].click()", click_here_style)
-                        time.sleep(0.1)
-                        click_li = driver.find_element(By.CSS_SELECTOR, ".ChooseSheet_cell_flex li:first-child")
-                        time.sleep(0.1)
+                        click_li = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, ".ChooseSheet_cell_flex li:first-child"))
+                        )
+                        # 点击找到的元素
                         driver.execute_script("arguments[0].click();", click_li)
 
                         # 是第一次就执行
@@ -234,32 +243,8 @@ def start_login():
                                     if span_content == solution:
                                         driver.execute_script("arguments[0].click();", li)
                                         break
-                    # 4.处理点击题
-                    # if click_elements != []:
-                    #     filling_questions = driver.find_elements(By.CSS_SELECTOR, "[data-controltype='filling']")
-                    #     for question in filling_questions:
-                    #         # 等待并获取填写框
-                    #         input_field = WebDriverWait(question, 10).until(
-                    #             EC.presence_of_element_located((By.CSS_SELECTOR, "input[data-itemtype='input']"))
-                    #         )
-                    #         # 等待并获取标准答案
-                    #         result_div = WebDriverWait(question, 10).until(
-                    #             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-itemtype='result']"))
-                    #         )
-                    #
-                    #         solution = result_div.get_attribute('innerHTML').strip()  # 获取 HTML 内容，并去除多余空格
-                    #         if not solution:  # 如果结果为空，则打印调试信息
-                    #             print("警告: 标准答案为空")
-                    #         else:
-                    #             # 清理答案，去除连续空格和换行符
-                    #             cleaned_solution = clean_solution(solution)
-                    #             print(f"标准答案: {cleaned_solution}")
-                    #             driver.execute_script("arguments[0].value = '';", input_field)
-                    #             if input_field != "(Answers may vary.)":
-                    #                 driver.execute_script("arguments[0].value = arguments[1];", input_field, cleaned_solution)  # 填写答案
-                    #             else:
-                    #                 driver.execute_script("arguments[0].value = arguments[1];", input_field, "None")
 
+                    # 这一种类型标识什么都没有
                     if choice_elements == [] and fillinglong_elements == [] and filling_elements == [] and click_elements == []:
                         time.sleep(0.5)
                         driver.switch_to.default_content()
@@ -273,19 +258,18 @@ def start_login():
                         button = driver.find_element(By.CSS_SELECTOR, "a[href='javascript:ReturnMain();']")
                         driver.execute_script("arguments[0].click();", button)
                         continue
-                    time.sleep(0.3)
                     # 可能出现点不到button的情况
                     driver.execute_script("arguments[0].click();", submit_button)
-                    time.sleep(0.3)
-                    submit_button = driver.find_element(By.CLASS_NAME, "layui-layer-btn0")
+                    submit_button = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.CLASS_NAME, "layui-layer-btn0"))
+                    )
+                    # 点击 layui-layer-btn0 按钮
                     driver.execute_script("arguments[0].click();", submit_button)
                     # 可选：提交或保存答案
-                    time.sleep(0.3)
-                    # 打印完成信息
                     driver.switch_to.default_content()
                     button = driver.find_element(By.CSS_SELECTOR, "a[href='javascript:ReturnMain();']")
                     driver.execute_script("arguments[0].click();", button)
-                    time.sleep(0.3)
+
         except Exception as e:
             print(f"报错了: {e}")
     except Exception as e:
@@ -296,7 +280,7 @@ def start_login():
 if __name__ == '__main__':
     # 创建主窗口
     root = tk.Tk()
-    root.title("登录自动化工具")
+    root.title("WeLearn辅助'学习'工具——ByteOJ出版")
 
     # 窗口尺寸
     window_width = 500
