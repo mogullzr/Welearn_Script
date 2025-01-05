@@ -3,7 +3,7 @@ import random
 import time
 import re
 from concurrent.futures import ThreadPoolExecutor
-
+import threading
 import html2text
 from openai import OpenAI
 from selenium import webdriver
@@ -18,6 +18,10 @@ from tkinter import messagebox, scrolledtext
 t1 = 0
 # 最后时间
 t2 = 0
+
+# 全局变量用于存储日志框
+log_window = None
+log_text = None
 
 
 def initialize_webdriver():
@@ -275,14 +279,6 @@ def worker(username, password, i, chapter_title_sum):
     driver.quit()
 
 
-# 任务处理函数
-def task_worker(driver, task_queue):
-    while not task_queue.empty():
-        url = task_queue.get()  # 从队列中获取任务
-        process_page(driver, url)
-        task_queue.task_done()  # 标记任务完成
-
-
 def show_log_window():
     global log_window, log_text
 
@@ -326,49 +322,52 @@ def start_login():
         return
 
     try:
-        driver = initialize_webdriver()
-        t1 = time.time()
-        login(driver, username, password)
-
-        ccid = 3314
-        root_url = f"https://welearn.sflep.com/student/course_info.aspx?cid={ccid}"
-        driver.get(root_url)
-        panel = WebDriverWait(driver, 10).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".panel.panel-default"))
-        )
-        chapters = len(panel) - 1
-        panel_sum = WebDriverWait(driver, 10).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".progress_fix"))
-        )
-
-        chapter_title_sum = {}
-        index = 0
-        for panel_little in panel_sum:
-            text = panel_little.text
-            num = int(text.split('/')[1])
-            chapter_title_sum[index] = num
-            index += 1
-
-        # 使用线程池
-        # max_workers=os.cpu_count() // 2
-        with ThreadPoolExecutor(chapters) as executor:  # 根据 CPU 核心数调整线程数
-            futures = []
-            for i in range(chapter, chapters + 1):
-                # 提交任务到线程池
-                future = executor.submit(worker, username, password, i, chapter_title_sum)
-                futures.append(future)
-
-            # 等待所有任务完成
-            for future in futures:
-                future.result()
+        # 在新线程中运行 Selenium 操作
+        selenium_thread = threading.Thread(target=run_selenium_operations, args=(username, password, chapter))
+        selenium_thread.start()
     except Exception as e:
         messagebox.showerror("错误", f"脚本启动失败：{e}")
+
+
+def run_selenium_operations(username, password, chapter):
+    driver = initialize_webdriver()
+    t1 = time.time()
+    login(driver, username, password)
+
+    ccid = 3314
+    root_url = f"https://welearn.sflep.com/student/course_info.aspx?cid={ccid}"
+    driver.get(root_url)
+    panel = WebDriverWait(driver, 10).until(
+        EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".panel.panel-default"))
+    )
+    chapters = len(panel) - 1
+    panel_sum = WebDriverWait(driver, 10).until(
+        EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".progress_fix"))
+    )
+
+    chapter_title_sum = {}
+    index = 0
+    for panel_little in panel_sum:
+        text = panel_little.text
+        num = int(text.split('/')[1])
+        chapter_title_sum[index] = num
+        index += 1
+
+    # 使用线程池
+    with ThreadPoolExecutor(chapters) as executor:
+        futures = []
+        for i in range(chapter, chapters + 1):
+            future = executor.submit(worker, username, password, i, chapter_title_sum)
+            futures.append(future)
+
+        # 等待所有任务完成
+        for future in futures:
+            future.result()
 
 
 if __name__ == '__main__':
     root = tk.Tk()
     root.title("WeLearn辅助'学习'工具——ByteOJ出版")
-
 
     window_width = 500
     window_height = 500
@@ -387,15 +386,13 @@ if __name__ == '__main__':
 
     username_frame = tk.Frame(root, bg="#f0f8ff")
     username_frame.pack(pady=15)
-    tk.Label(username_frame, text="用户名:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0,
-                                                                                                  padx=15)
+    tk.Label(username_frame, text="用户名:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0, padx=15)
     username_entry = tk.Entry(username_frame, font=("Arial", 14), width=30)
     username_entry.grid(row=0, column=1, padx=10)
 
     password_frame = tk.Frame(root, bg="#f0f8ff")
     password_frame.pack(pady=15)
-    tk.Label(password_frame, text="密码:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0,
-                                                                                                padx=15)
+    tk.Label(password_frame, text="密码:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0, padx=15)
     password_entry = tk.Entry(password_frame, font=("Arial", 14), show="*", width=30)
     password_entry.grid(row=0, column=1, padx=10)
 
@@ -420,13 +417,14 @@ if __name__ == '__main__':
         bd=3,
     )
     login_button.pack(pady=20)
+
     # 添加一个按钮，点击后显示日志窗口
-    # def on_button_click():
-    #     show_log_window()
-    #     print("日志窗口已显示！")
-    #     print("这是一条测试日志信息。")
-    #
-    # button = tk.Button(root, text="显示日志窗口", command=on_button_click)
-    # button.pack(pady=20)
+    def on_button_click():
+        show_log_window()
+        print("日志窗口已显示！")
+        print("这是一条测试日志信息。")
+
+    button = tk.Button(root, text="显示日志窗口", command=on_button_click)
+    button.pack(pady=20)
 
     root.mainloop()
