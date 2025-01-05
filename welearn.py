@@ -27,7 +27,7 @@ log_window = None
 log_text = None
 
 # 全局变量用于存储刷课模式
-multi_thread_mode = False  # 默认使用普通模式
+multi_thread_mode = True  # 默认使用多线程模式
 
 
 def print_color(text, color="white", style=None, isDash=None):
@@ -59,7 +59,7 @@ def print_color(text, color="white", style=None, isDash=None):
 
 def initialize_webdriver():
     options = webdriver.ChromeOptions()
-    # options.add_argument("--headless")  # 启用无头模式
+    options.add_argument("--headless")  # 启用无头模式
     options.add_argument("--disable-css")  # 禁用css
     options.add_argument("--disable-images")  # 图片不加载
     options.add_argument("--disable-blink-features=AutomationControlled")
@@ -111,22 +111,54 @@ def login(driver, username, password):
     WebDriverWait(driver, 15).until(EC.url_changes("https://sso.sflep.com/idsvr/login.html"))
 
 
-def handle_choice_questions(driver):
+def should_answer_correctly(correct_rate, total_questions, correct_count, current_question):
+    """
+    混合随机与动态调整，确保最终正确率接近设定值
+    :param correct_rate: 目标正确率（0 到 100）
+    :param total_questions: 总题数
+    :param correct_count: 当前已答对的题数
+    :param current_question: 当前题号（从 1 开始）
+    :return: True 表示回答正确，False 表示回答错误
+    """
+    target_correct = total_questions * (correct_rate / 100)
+    remaining_questions = total_questions - current_question + 1
+    required_correct = max(0, target_correct - correct_count)
+
+    # 计算剩余题目中需要答对的比例
+    if required_correct / remaining_questions >= 1:
+        return True  # 必须答对
+    elif required_correct / remaining_questions <= 0:
+        return False  # 必须答错
+    else:
+        return random.random() < (required_correct / remaining_questions)
+
+
+def handle_choice_questions(driver, correct_rate, total_questions, correct_count, current_question):
     choice_elements = driver.find_elements(By.CSS_SELECTOR, "div[data-controltype='choice']")
     if choice_elements:
         ul_elements = driver.find_elements(By.CSS_SELECTOR, "ul[data-itemtype='options']")
         for ul in ul_elements:
             options_li = ul.find_elements(By.TAG_NAME, "li")
-            for option in options_li:
-                solution = option.get_attribute("data-solution")
-                if solution is not None:
-                    driver.execute_script("arguments[0].click();", option)
-                    time.sleep(0.3)
-                    print_color(f"已选择答案: {solution}", color="red", style="bold", isDash=True)
-                    break
+            if should_answer_correctly(correct_rate, total_questions, correct_count[0], current_question[0]):
+                # 回答正确：选择第一个正确答案
+                for option in options_li:
+                    solution = option.get_attribute("data-solution")
+                    if solution is not None:
+                        driver.execute_script("arguments[0].click();", option)
+                        time.sleep(0.3)
+                        print_color(f"已选择答案: {solution}", color="red", style="bold", isDash=True)
+                        correct_count[0] += 1
+                        break
+            else:
+                # 回答错误：随机选择一个错误答案
+                wrong_options = [option for option in options_li if option.get_attribute("data-solution") is None]
+                if wrong_options:
+                    random.choice(wrong_options).click()
+                    print_color("回答错误: 随机选择了一个错误答案", color="yellow", style="bold", isDash=True)
+            current_question[0] += 1
 
 
-def handle_filling_questions(driver, question_type):
+def handle_filling_questions(driver, question_type, correct_rate, total_questions, correct_count, current_question):
     if question_type == "fillinglong":
         selector = "[data-controltype='fillinglong']"
         input_selector = "textarea[data-itemtype='textarea']"
@@ -147,15 +179,24 @@ def handle_filling_questions(driver, question_type):
             print_color("警告: 标准答案为空", color="red", style="bold", isDash=True)
         else:
             cleaned_solution = clean_solution(solution)
-            print_color(f"标准答案: {cleaned_solution}", color="red", style="bold", isDash=True)
-            driver.execute_script("arguments[0].value = '';", input_field)
-            if cleaned_solution != "(Answers may vary.)":
-                driver.execute_script("arguments[0].value = arguments[1];", input_field, cleaned_solution)
+            if should_answer_correctly(correct_rate, total_questions, correct_count[0], current_question[0]):
+                # 回答正确：填写标准答案
+                print_color(f"标准答案: {cleaned_solution}", color="red", style="bold", isDash=True)
+                driver.execute_script("arguments[0].value = '';", input_field)
+                if cleaned_solution != "(Answers may vary.)":
+                    driver.execute_script("arguments[0].value = arguments[1];", input_field, cleaned_solution)
+                else:
+                    driver.execute_script("arguments[0].value = arguments[1];", input_field, "None")
+                correct_count[0] += 1
             else:
-                driver.execute_script("arguments[0].value = arguments[1];", input_field, "None")
+                # 回答错误：填写随机错误答案
+                wrong_answer = "错误答案"
+                driver.execute_script("arguments[0].value = arguments[1];", input_field, wrong_answer)
+                print_color(f"回答错误: 填写了随机错误答案: {wrong_answer}", color="yellow", style="bold", isDash=True)
+            current_question[0] += 1
 
 
-def handle_click_questions(driver):
+def handle_click_questions(driver, correct_rate, total_questions, correct_count, current_question):
     click_elements = driver.find_elements(By.CSS_SELECTOR, ".ChooseBox.block_content.p")
     if click_elements:
         click_here_style = driver.find_element(By.CLASS_NAME, "click_here_style")
@@ -187,12 +228,21 @@ def handle_click_questions(driver):
                 all_li_elements = WebDriverWait(driver, 10).until(
                     EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".ChooseSheet_cell_flex li"))
                 )
-                for li in all_li_elements:
-                    span_content = li.find_element(By.TAG_NAME, "span").text.replace(' ', '')
-                    solution = solution.replace(' ', '')
-                    if span_content == solution:
-                        driver.execute_script("arguments[0].click();", li)
-                        break
+                if should_answer_correctly(correct_rate, total_questions, correct_count[0], current_question[0]):
+                    # 回答正确：选择正确答案
+                    for li in all_li_elements:
+                        span_content = li.find_element(By.TAG_NAME, "span").text.replace(' ', '')
+                        solution = solution.replace(' ', '')
+                        if span_content == solution:
+                            driver.execute_script("arguments[0].click();", li)
+                            correct_count[0] += 1
+                            break
+                else:
+                    # 回答错误：随机选择一个错误答案
+                    wrong_li = random.choice(all_li_elements)
+                    driver.execute_script("arguments[0].click();", wrong_li)
+                    print_color("回答错误: 随机选择了一个错误答案", color="yellow", style="bold", isDash=True)
+                current_question[0] += 1
 
 
 def handle_writing_questions(driver):
@@ -250,7 +300,7 @@ def handle_writing_questions(driver):
         driver.execute_script("arguments[0].value = arguments[1];", modify_content, answer)
 
 
-def process_page(driver, url):
+def process_page(driver, url, correct_rate, total_questions, correct_count, current_question):
     driver.get(url)
     iframe = WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.TAG_NAME, "iframe"))
@@ -263,10 +313,10 @@ def process_page(driver, url):
         button.click()
         return
 
-    handle_choice_questions(driver)
-    handle_filling_questions(driver, "fillinglong")
-    handle_filling_questions(driver, "filling")
-    handle_click_questions(driver)
+    handle_choice_questions(driver, correct_rate, total_questions, correct_count, current_question)
+    handle_filling_questions(driver, "fillinglong", correct_rate, total_questions, correct_count, current_question)
+    handle_filling_questions(driver, "filling", correct_rate, total_questions, correct_count, current_question)
+    handle_click_questions(driver, correct_rate, total_questions, correct_count, current_question)
     handle_writing_questions(driver)
 
     if not any([driver.find_elements(By.CSS_SELECTOR, selector) for selector in [
@@ -315,18 +365,25 @@ def time_diff_to_hms(start_time, end_time):
     return hours, minutes, seconds
 
 
-def worker(username, password, i, chapter_title_sum, isSpeed, driver):
-    if isSpeed:
-        driver = initialize_webdriver()
-        login(driver, username, password)
-
+def worker(username, password, i, chapter_title_sum):
+    driver = initialize_webdriver()
+    login(driver, username, password)
     times = datetime.datetime
-    for j in range(1, chapter_title_sum[i] + 1):
+
+    # 获取正确率
+    correct_rate = float(correct_rate_entry.get())
+
+    # 统计总题数和已答对的题数
+    total_questions = 10  # 假设每章有 10 道题
+    correct_count = [0]  # 使用列表以便在函数中修改
+    current_question = [1]  # 当前题号
+
+    for j in range(1, 4):
         start_date = times.now().strftime("%Y-%m-%d %H:%M:%S")
         url = f"https://welearn.sflep.com/student/StudyCourse.aspx?cid=3314&classid=602663&sco=m-1-{i}-{j}"
         print_color(f"{start_date}:开始刷小节内容：第{i}章-第{j}小节内容(#^.^#)", color="blue", style="bold", isDash=True)
 
-        process_page(driver, url)
+        process_page(driver, url, correct_rate, total_questions, correct_count, current_question)
 
         end_date = times.now().strftime("%Y-%m-%d %H:%M:%S")
         print_color(f"{end_date}:已经刷完了第{i}章-第{j}小节内容(#^.^#)", style="bold", color="green", isDash=True)
@@ -431,7 +488,7 @@ def run_selenium_operations(username, password, chapter):
         with ThreadPoolExecutor(chapters) as executor:
             futures = []
             for i in range(chapter, chapters + 1):
-                future = executor.submit(worker, username, password, i, chapter_title_sum, multi_thread_mode, None)
+                future = executor.submit(worker, username, password, i, chapter_title_sum)
                 futures.append(future)
 
             # 等待所有任务完成
@@ -440,7 +497,7 @@ def run_selenium_operations(username, password, chapter):
     else:
         # 单线程模式
         for i in range(chapter, chapters + 1):
-            worker(username, password, i, chapter_title_sum, multi_thread_mode, driver)
+            worker(username, password, i, chapter_title_sum)
 
     date = datetime.datetime
     nowDate = date.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -450,7 +507,7 @@ def run_selenium_operations(username, password, chapter):
 def toggle_thread_mode():
     global multi_thread_mode
     multi_thread_mode = not multi_thread_mode
-    mode_text = "急速模式" if multi_thread_mode else "普通模式"
+    mode_text = "多线程模式" if multi_thread_mode else "单线程模式"
     mode_button.config(text=f"切换模式: {mode_text}")
     print_color(f"已切换到{mode_text}", color="blue", style="bold", isDash=True)
 
@@ -460,8 +517,8 @@ if __name__ == '__main__':
     root = ttk.Window(themename="cosmo")  # 可选主题：cosmo, flatly, journal, etc.
     root.title("WeLearn辅助'学习'工具——ByteOJ出版")
 
-    window_width = 500
-    window_height = 500
+    window_width = 550
+    window_height = 600
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = (screen_width - window_width) // 2
@@ -505,6 +562,14 @@ if __name__ == '__main__':
     chapter_entry = ttk.Entry(chapter_frame, font=("Arial", 14), width=30)
     chapter_entry.grid(row=0, column=1, padx=10)
 
+    # 正确率输入框
+    correct_rate_frame = ttk.Frame(main_frame)
+    correct_rate_frame.pack(pady=10)
+    ttk.Label(correct_rate_frame, text="正确率 (%):", font=("Arial", 14)).grid(row=0, column=0, padx=10)
+    correct_rate_entry = ttk.Entry(correct_rate_frame, font=("Arial", 14), width=10)
+    correct_rate_entry.grid(row=0, column=1, padx=10)
+    correct_rate_entry.insert(0, "100")  # 默认正确率为 100%
+
     # 启动脚本按钮
     login_button = ttk.Button(
         main_frame,
@@ -534,7 +599,7 @@ if __name__ == '__main__':
     # 切换刷课模式按钮
     mode_button = ttk.Button(
         main_frame,
-        text="切换模式: 普通模式",
+        text="切换模式: 多线程模式",
         style="TButton",
         width=25,
         command=toggle_thread_mode,
