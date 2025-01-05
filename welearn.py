@@ -1,3 +1,4 @@
+import datetime
 import os
 import random
 import time
@@ -13,15 +14,47 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 
 # 初始时间
-t1 = 0
+t1 = time.time()
 # 最后时间
 t2 = 0
 
 # 全局变量用于存储日志框
 log_window = None
 log_text = None
+
+# 全局变量用于存储刷课模式
+multi_thread_mode = False  # 默认使用普通模式
+
+
+def print_color(text, color="white", style=None, isDash=None):
+    """
+    在 Tkinter 的 Text 组件中打印带颜色的文本
+
+    :param text: 要打印的文本
+    :param color: 文本颜色（可选：red, green, blue, yellow, white）
+    :param style: 文本样式（可选：bold）
+    """
+    if not log_text:
+        return  # 如果日志框未初始化，直接返回
+
+    # 构建标签
+    tags = []
+    if color:
+        tags.append(color)
+    if style:
+        tags.append(style)
+    if isDash:
+        text += "\n-------------------------------------------------------------------------------------------------"
+
+    # 插入带颜色的文本
+    log_text.configure(state="normal")
+    log_text.insert("end", text + "\n", tuple(tags))
+    log_text.configure(state="disabled")
+    log_text.see("end")  # 自动滚动到底部
 
 
 def initialize_webdriver():
@@ -62,7 +95,7 @@ def DeepSeekAsk(prompt, temperature):
         temperature=temperature,
         stream=False
     )
-    print(response.choices[0].message.content)
+    print_color(response.choices[0].message.content, color="blue", style="bold", isDash=True)
     return response.choices[0].message.content
 
 
@@ -89,7 +122,7 @@ def handle_choice_questions(driver):
                 if solution is not None:
                     driver.execute_script("arguments[0].click();", option)
                     time.sleep(0.3)
-                    print(f"已选择答案: {solution}")
+                    print_color(f"已选择答案: {solution}", color="red", style="bold", isDash=True)
                     break
 
 
@@ -111,10 +144,10 @@ def handle_filling_questions(driver, question_type):
         )
         solution = result_div.get_attribute('innerHTML').strip()
         if not solution:
-            print("警告: 标准答案为空")
+            print_color("警告: 标准答案为空", color="red", style="bold", isDash=True)
         else:
             cleaned_solution = clean_solution(solution)
-            print(f"标准答案: {cleaned_solution}")
+            print_color(f"标准答案: {cleaned_solution}", color="red", style="bold", isDash=True)
             driver.execute_script("arguments[0].value = '';", input_field)
             if cleaned_solution != "(Answers may vary.)":
                 driver.execute_script("arguments[0].value = arguments[1];", input_field, cleaned_solution)
@@ -143,9 +176,9 @@ def handle_click_questions(driver):
             )
             solution = result_div.get_attribute('innerHTML').strip()
             if not solution:
-                print("警告: 标准答案为空")
+                print_color("警告: 标准答案为空", color="red", style="bold", isDash=True)
             else:
-                print(f"标准答案: {solution}")
+                print_color(f"标准答案: {solution}", color="red", style="bold", isDash=True)
                 if flag:
                     div = driver.find_elements(By.CSS_SELECTOR, "div[data-itemtype='myresult']")[0]
                     driver.execute_script("arguments[0].click();", div)
@@ -267,46 +300,87 @@ def process_page(driver, url):
     driver.execute_script("arguments[0].click();", button)
 
 
-def worker(username, password, i, chapter_title_sum):
-    driver = initialize_webdriver()
-    login(driver, username, password)
+def time_diff_to_hms(start_time, end_time):
+    """
+    计算两个时间戳之间的时间差，并返回小时、分钟、秒
+
+    :param start_time: 开始时间戳
+    :param end_time: 结束时间戳
+    :return: (hours, minutes, seconds)
+    """
+    time_diff = end_time - start_time
+    hours = int(time_diff // 3600)
+    minutes = int((time_diff % 3600) // 60)
+    seconds = int(time_diff % 60)
+    return hours, minutes, seconds
+
+
+def worker(username, password, i, chapter_title_sum, isSpeed, driver):
+    if isSpeed:
+        driver = initialize_webdriver()
+        login(driver, username, password)
+
+    times = datetime.datetime
     for j in range(1, chapter_title_sum[i] + 1):
+        start_date = times.now().strftime("%Y-%m-%d %H:%M:%S")
         url = f"https://welearn.sflep.com/student/StudyCourse.aspx?cid=3314&classid=602663&sco=m-1-{i}-{j}"
+        print_color(f"{start_date}:开始刷小节内容：第{i}章-第{j}小节内容(#^.^#)", color="blue", style="bold", isDash=True)
+
         process_page(driver, url)
-        print(f"{i}-{j}小节结束！！！！")
-    print(f"{i}章节结束！！！！")
+
+        end_date = times.now().strftime("%Y-%m-%d %H:%M:%S")
+        print_color(f"{end_date}:已经刷完了第{i}章-第{j}小节内容(#^.^#)", style="bold", color="green", isDash=True)
+    print_color(f"{i}章节结束！！！！", color="green", style="bold")
     t2 = time.time()
+    hours, minutes, seconds = time_diff_to_hms(t1, t2)
+    print_color(f"第{i}章节一共花费了{hours}小时{minutes}分钟{seconds}秒O(∩_∩)O", style="bold", color="red", isDash=True)
     driver.quit()
 
 
 def show_log_window():
     global log_window, log_text
 
-    log_window = tk.Toplevel()
+    log_window = ttk.Toplevel()
     log_window.title("日志信息")
     log_window.geometry("600x400")
 
     log_text = scrolledtext.ScrolledText(log_window, wrap=tk.WORD, width=70, height=20)
     log_text.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
 
-    # 重定向print输出到日志框
+    # 定义颜色标签
+    log_text.tag_config("red", foreground="red")
+    log_text.tag_config("green", foreground="green")
+    log_text.tag_config("blue", foreground="blue")
+    log_text.tag_config("yellow", foreground="yellow")
+    log_text.tag_config("bold", font=("Arial", 10, "bold"))
+
+    # 重定向 print 输出到日志框
     import sys
     sys.stdout = TextRedirector(log_text, "stdout")
 
 
-class TextRedirector(object):
+class TextRedirector:
     def __init__(self, widget, tag="stdout"):
+        """
+        重定向 print 输出到 Tkinter 的 Text 组件，并支持带颜色的文本
+
+        :param widget: Tkinter 的 Text 组件
+        :param tag: 默认的标签（用于设置颜色和样式）
+        """
         self.widget = widget
         self.tag = tag
 
-    def write(self, str):
-        self.widget.configure(state="normal")
-        self.widget.insert("end", str, (self.tag,))
-        self.widget.configure(state="disabled")
-        self.widget.see("end")
+    def write(self, text):
+        """
+        将文本插入到 Text 组件中，并根据颜色标签设置样式
+        """
+        self.widget.configure(state="normal")  # 允许编辑
+        self.widget.insert("end", text, (self.tag,))  # 插入文本并应用标签
+        self.widget.configure(state="disabled")  # 禁止编辑
+        self.widget.see("end")  # 自动滚动到底部
 
     def flush(self):
-        pass
+        pass  # 必须实现 flush 方法
 
 
 def start_login():
@@ -331,7 +405,6 @@ def start_login():
 
 def run_selenium_operations(username, password, chapter):
     driver = initialize_webdriver()
-    t1 = time.time()
     login(driver, username, password)
 
     ccid = 3314
@@ -353,20 +426,38 @@ def run_selenium_operations(username, password, chapter):
         chapter_title_sum[index] = num
         index += 1
 
-    # 使用线程池
-    with ThreadPoolExecutor(chapters) as executor:
-        futures = []
-        for i in range(chapter, chapters + 1):
-            future = executor.submit(worker, username, password, i, chapter_title_sum)
-            futures.append(future)
+    if multi_thread_mode:
+        # 使用线程池
+        with ThreadPoolExecutor(chapters) as executor:
+            futures = []
+            for i in range(chapter, chapters + 1):
+                future = executor.submit(worker, username, password, i, chapter_title_sum, multi_thread_mode, None)
+                futures.append(future)
 
-        # 等待所有任务完成
-        for future in futures:
-            future.result()
+            # 等待所有任务完成
+            for future in futures:
+                future.result()
+    else:
+        # 单线程模式
+        for i in range(chapter, chapters + 1):
+            worker(username, password, i, chapter_title_sum, multi_thread_mode, driver)
+
+    date = datetime.datetime
+    nowDate = date.now().strftime("%Y-%m-%d %H:%M:%S")
+    print_color(f"{nowDate}:刷课结束o(￣▽￣)ｄ!!!!!!!!!!!!!!!!!!!!!!!!!!", style="bold", color="green", isDash=True)
+
+
+def toggle_thread_mode():
+    global multi_thread_mode
+    multi_thread_mode = not multi_thread_mode
+    mode_text = "急速模式" if multi_thread_mode else "普通模式"
+    mode_button.config(text=f"切换模式: {mode_text}")
+    print_color(f"已切换到{mode_text}", color="blue", style="bold", isDash=True)
 
 
 if __name__ == '__main__':
-    root = tk.Tk()
+    # 使用 ttkbootstrap 主题
+    root = ttk.Window(themename="cosmo")  # 可选主题：cosmo, flatly, journal, etc.
     root.title("WeLearn辅助'学习'工具——ByteOJ出版")
 
     window_width = 500
@@ -377,54 +468,77 @@ if __name__ == '__main__':
     y = (screen_height - window_height) // 2
     root.geometry(f"{window_width}x{window_height}+{x}+{y}")
     root.resizable(False, False)
-    root.configure(bg="#f0f8ff")
 
-    title_label = tk.Label(
-        root, text="WeLearn辅助'学习'工具——ByteOJ出版", font=("Arial", 20, "bold"), bg="#f0f8ff", fg="#333333"
+    # 设置圆角样式
+    style = ttk.Style()
+    style.configure("TButton", borderwidth=0, relief="flat", padding=10, font=("Arial", 12), background="#4CAF50",
+                    foreground="white", bordercolor="#4CAF50", focusthickness=0, focuscolor="none", borderradius=15)
+    style.map("TButton", background=[("active", "#45a049")])  # 点击时的背景色
+
+    # 主界面布局
+    main_frame = ttk.Frame(root)
+    main_frame.pack(pady=20, padx=20, fill=tk.BOTH, expand=True)
+
+    title_label = ttk.Label(
+        main_frame, text="WeLearn辅助'学习'工具——ByteOJ出版", font=("Arial", 20, "bold")
     )
     title_label.pack(pady=20)
 
-    username_frame = tk.Frame(root, bg="#f0f8ff")
-    username_frame.pack(pady=15)
-    tk.Label(username_frame, text="用户名:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0, padx=15)
-    username_entry = tk.Entry(username_frame, font=("Arial", 14), width=30)
+    # 用户名输入框
+    username_frame = ttk.Frame(main_frame)
+    username_frame.pack(pady=10)
+    ttk.Label(username_frame, text="用户名:", font=("Arial", 14)).grid(row=0, column=0, padx=10)
+    username_entry = ttk.Entry(username_frame, font=("Arial", 14), width=30)
     username_entry.grid(row=0, column=1, padx=10)
 
-    password_frame = tk.Frame(root, bg="#f0f8ff")
-    password_frame.pack(pady=15)
-    tk.Label(password_frame, text="密码:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0, padx=15)
-    password_entry = tk.Entry(password_frame, font=("Arial", 14), show="*", width=30)
+    # 密码输入框
+    password_frame = ttk.Frame(main_frame)
+    password_frame.pack(pady=10)
+    ttk.Label(password_frame, text="密码:", font=("Arial", 14)).grid(row=0, column=0, padx=10)
+    password_entry = ttk.Entry(password_frame, font=("Arial", 14), show="*", width=30)
     password_entry.grid(row=0, column=1, padx=10)
 
-    chapter_frame = tk.Frame(root, bg="#f0f8ff")
-    chapter_frame.pack(pady=15)
-    tk.Label(chapter_frame, text="章节:", font=("Arial", 14), bg="#f0f8ff", fg="#333333").grid(row=0, column=0, padx=15)
-    chapter_entry = tk.Entry(chapter_frame, font=("Arial", 14), width=30)
+    # 章节输入框
+    chapter_frame = ttk.Frame(main_frame)
+    chapter_frame.pack(pady=10)
+    ttk.Label(chapter_frame, text="章节:", font=("Arial", 14)).grid(row=0, column=0, padx=10)
+    chapter_entry = ttk.Entry(chapter_frame, font=("Arial", 14), width=30)
     chapter_entry.grid(row=0, column=1, padx=10)
 
-    login_button = tk.Button(
-        root,
+    # 启动脚本按钮
+    login_button = ttk.Button(
+        main_frame,
         text="启动脚本",
-        font=("Arial", 14, "bold"),
-        bg="#4682b4",
-        fg="white",
-        activebackground="#5a9bd3",
-        activeforeground="white",
+        style="TButton",
         width=25,
-        height=2,
         command=start_login,
-        relief="raised",
-        bd=3,
     )
     login_button.pack(pady=20)
 
-    # 添加一个按钮，点击后显示日志窗口
+    # 显示日志窗口按钮
     def on_button_click():
         show_log_window()
-        print("日志窗口已显示！")
-        print("这是一条测试日志信息。")
+        print_color("欢迎━(*｀∀´*)ノ亻!来到ByteOJ创始人——Mogullzr研发的Welearn刷课脚本", style="bold", isDash=False)
+        print_color("下面显示的内容是刷课的日志信息(#^.^#)(#^.^#)", style="bold", isDash=True)
 
-    button = tk.Button(root, text="显示日志窗口", command=on_button_click)
-    button.pack(pady=20)
+
+    log_button = ttk.Button(
+        main_frame,
+        text="显示日志窗口",
+        style="TButton",
+        width=25,
+        command=on_button_click,
+    )
+    log_button.pack(pady=10)
+
+    # 切换刷课模式按钮
+    mode_button = ttk.Button(
+        main_frame,
+        text="切换模式: 普通模式",
+        style="TButton",
+        width=25,
+        command=toggle_thread_mode,
+    )
+    mode_button.pack(pady=10)
 
     root.mainloop()
