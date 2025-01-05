@@ -378,7 +378,7 @@ def worker(username, password, i, chapter_title_sum):
     correct_count = [0]  # 使用列表以便在函数中修改
     current_question = [1]  # 当前题号
 
-    for j in range(1, 4):
+    for j in range(1, chapter_title_sum[i]):
         start_date = times.now().strftime("%Y-%m-%d %H:%M:%S")
         url = f"https://welearn.sflep.com/student/StudyCourse.aspx?cid=3314&classid=602663&sco=m-1-{i}-{j}"
         print_color(f"{start_date}:开始刷小节内容：第{i}章-第{j}小节内容(#^.^#)", color="blue", style="bold", isDash=True)
