@@ -15,6 +15,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 import ttkbootstrap as ttk
+from webdriver_manager.chrome import ChromeDriverManager
 
 # 初始时间
 t1 = time.time()
@@ -58,6 +59,9 @@ def print_color(text, color="white", style=None, isDash=None):
 
 
 def initialize_webdriver():
+    # 使用 ChromeDriverManager 安装 ChromeDriver，并返回驱动程序的路径
+    driver_path = ChromeDriverManager().install()
+    # 打印驱动程序路径
     options = webdriver.ChromeOptions()
     # options.add_argument("--headless")  # 启用无头模式
     options.add_argument("--disable-css")  # 禁用css
@@ -66,7 +70,7 @@ def initialize_webdriver():
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 
-    driver = webdriver.Chrome(service=Service("./chromedriver_win32/chromedriver.exe"), options=options)
+    driver = webdriver.Chrome(service=Service(driver_path), options=options)
     driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
         "source": """
         Object.defineProperty(navigator, 'webdriver', {
@@ -75,7 +79,6 @@ def initialize_webdriver():
         """
     })
     return driver
-
 
 def clean_solution(solution):
     solution = re.sub(r'\s{2,}', ' ', solution)
@@ -209,12 +212,12 @@ def handle_filling_questions(driver, question_type, option_time, correct_rate):
 
     for question in filling_questions:
         # 聚焦填空input位置
-        input_field = WebDriverWait(question, 10).until(
+        input_field = WebDriverWait(question, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, input_selector))
         )
 
         # 获取题目答案
-        result_div = WebDriverWait(question, 10).until(
+        result_div = WebDriverWait(question, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-itemtype='result']"))
         )
 
@@ -278,7 +281,7 @@ def handle_click_questions(driver, option_time):
         # 首先点击第一个按钮位置，先打开下框栏
         click_here_style = driver.find_element(By.CLASS_NAME, "click_here_style")
         driver.execute_script("arguments[0].click()", click_here_style)
-        click_li = WebDriverWait(driver, 10).until(
+        click_li = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".ChooseSheet_cell_flex li:first-child"))
         )
         driver.execute_script("arguments[0].click();", click_li)
@@ -288,7 +291,7 @@ def handle_click_questions(driver, option_time):
         # 开始填充题目答案
         for question in filling_questions:
             # 找题目答案
-            result_div = WebDriverWait(question, 10).until(
+            result_div = WebDriverWait(question, 20).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-itemtype='result']"))
             )
             solution = result_div.get_attribute('innerHTML').strip()
@@ -305,7 +308,7 @@ def handle_click_questions(driver, option_time):
                     flag = False
 
                 # 开始选择正确答案
-                all_li_elements = WebDriverWait(driver, 10).until(
+                all_li_elements = WebDriverWait(driver, 20).until(
                     EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".ChooseSheet_cell_flex li"))
                 )
                 for li in all_li_elements:
@@ -377,11 +380,14 @@ def handle_writing_questions(driver):
         writing_create_icon_button.click()
 
         # 聚焦编辑页面
-        modify_content = WebDriverWait(driver, 10).until(
+        modify_content = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".my_textarea_content"))
         )
         driver.execute_script("arguments[0].value = '';", modify_content)
         driver.execute_script("arguments[0].value = arguments[1];", modify_content, answer)
+
+        return True
+    return False
 
 
 def process_page(driver, url, wait_time):
@@ -401,7 +407,7 @@ def process_page(driver, url, wait_time):
     driver.get(url)
 
     # 网页比较狗，有多个地方使用了iframe嵌套方式来反爬
-    iframe = WebDriverWait(driver, 10).until(
+    iframe = WebDriverWait(driver, 20).until(
         EC.presence_of_element_located((By.TAG_NAME, "iframe"))
     )
     driver.switch_to.frame(iframe)
@@ -427,7 +433,33 @@ def process_page(driver, url, wait_time):
     handle_filling_questions(driver, "fillinglong", option_time, correct_rate)
     handle_filling_questions(driver, "filling", option_time, correct_rate)
     handle_click_questions(driver, option_time)
-    handle_writing_questions(driver)
+    isWriting = handle_writing_questions(driver)
+    if isWriting:
+        # 寻找题目 Submit 按钮
+        submit_button = driver.find_element(By.CSS_SELECTOR, "[data-controltype='submit']")
+        if not submit_button:
+            driver.switch_to.default_content()
+            button = driver.find_element(By.CSS_SELECTOR, "a[href='javascript:ReturnMain();']")
+            driver.execute_script("arguments[0].click();", button)
+            return
+
+        # 点击 Submit 按钮
+        driver.execute_script("arguments[0].click();", submit_button)
+        submit_button = WebDriverWait(driver, 100).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "cmd_submit"))
+        )
+        driver.execute_script("arguments[0].click();", submit_button)
+        driver.switch_to.default_content()
+
+        # 返回课程首页
+        button = driver.find_element(By.CSS_SELECTOR, "a[href='javascript:ReturnMain();']")
+
+        # 等待设定的间隔时间
+        time.sleep(wait_time)
+
+        # 回到主页面
+        driver.execute_script("arguments[0].click();", button)
+        return
 
     # 如果这5中类型的题目没有任何一个匹配得到，就代表页面没有题目
     if not any([driver.find_elements(By.CSS_SELECTOR, selector) for selector in [
@@ -453,7 +485,7 @@ def process_page(driver, url, wait_time):
 
     # 点击 Submit 按钮
     driver.execute_script("arguments[0].click();", submit_button)
-    submit_button = WebDriverWait(driver, 10).until(
+    submit_button = WebDriverWait(driver, 100).until(
         EC.presence_of_element_located((By.CLASS_NAME, "layui-layer-btn0"))
     )
     driver.execute_script("arguments[0].click();", submit_button)
@@ -636,11 +668,11 @@ def run_selenium_operations(username, password, chapter):
     driver.get(root_url)
 
     # 通过 html 结构解析出每个章节的题目的数量
-    panel = WebDriverWait(driver, 10).until(
+    panel = WebDriverWait(driver, 20).until(
         EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".panel.panel-default"))
     )
     chapters = len(panel) - 1
-    panel_sum = WebDriverWait(driver, 10).until(
+    panel_sum = WebDriverWait(driver, 20).until(
         EC.presence_of_all_elements_located((By.CSS_SELECTOR, ".progress_fix"))
     )
 
