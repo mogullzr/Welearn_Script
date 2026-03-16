@@ -95,7 +95,7 @@ def DeepSeekAsk(prompt, temperature):
     :param temperature: 某种类型的参数
     :return: AI回答的答案
     """
-    api_key = "sk-ecee03845a1b42938fb66bae42694268"
+    api_key = "xxxxxxxxxxxxxxxxxxxx" # 自己去deepseek官网搞一个
     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
     response = client.chat.completions.create(
         model="deepseek-chat",

@@ -49,7 +49,7 @@
 ### 0.准备购买一个deepseek接口
 
 ```
-sk-ecee03845a1b42938fb66bae42694268
+xxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 
